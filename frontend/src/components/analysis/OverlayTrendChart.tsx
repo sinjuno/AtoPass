@@ -32,6 +32,14 @@ const AUX_METRICS: {
 /** 보조 지표의 평균이 놓이는 높이(0~1)와, 평균에서 가장 멀리 벗어났을 때 위아래로 움직이는 폭 */
 const AUX_CENTER = 0.5;
 const AUX_AMPLITUDE = 0.4;
+/** 오른쪽 눈금을 찍는 자리(정규화된 값). normalizer()의 역산으로 그 자리의 실제 수치를 구한다 */
+const AUX_AXIS_TICKS = [
+  AUX_CENTER - AUX_AMPLITUDE,
+  AUX_CENTER - AUX_AMPLITUDE / 2,
+  AUX_CENTER,
+  AUX_CENTER + AUX_AMPLITUDE / 2,
+  AUX_CENTER + AUX_AMPLITUDE,
+];
 
 interface Props {
   /** 날짜별 불편함 지수. 기록 없는 날은 null. 이 날짜들이 그래프의 가로축이 된다 */
@@ -93,6 +101,20 @@ export default function OverlayTrendChart({ pain, aux, onDateClick }: Props) {
     temperature: normalize.temperature(aligned.temperature[i].value),
     humidity: normalize.humidity(aligned.humidity[i].value),
   }));
+  const auxAverage = Object.fromEntries(AUX_METRICS.map((m) => [m.key, average(valuesOf(aligned[m.key]))])) as Record<
+    AuxKey,
+    number | null
+  >;
+  // 기온·습도를 강조해서 볼 때만, 정규화해 겹쳐 그린 선은 그대로 두고 오른쪽에 그 지표의 실제 수치 눈금을 보여 준다.
+  const rightAxisMetric =
+    (emphasis === 'temperature' || emphasis === 'humidity') && auxAverage[emphasis] !== null
+      ? AUX_METRICS.find((m) => m.key === emphasis)!
+      : null;
+  const rightAxisAverage = rightAxisMetric ? (auxAverage[rightAxisMetric.key] as number) : 0;
+  const formatRightAxisTick = (position: number) =>
+    rightAxisMetric
+      ? `${round(rightAxisAverage + ((position - AUX_CENTER) / AUX_AMPLITUDE) * rightAxisMetric.swing, rightAxisMetric.digits)}${rightAxisMetric.unit}`
+      : '';
 
   const painValues = valuesOf(pain);
   const painAverage = average(painValues);
@@ -159,7 +181,8 @@ export default function OverlayTrendChart({ pain, aux, onDateClick }: Props) {
 
       <p className="text-sm text-gray-400 dark:text-gray-400">
         왼쪽 눈금은 불편함 지수(0–10)예요. 점선 지표는 기간 평균을 가운데에 두고, 평균보다 높으면 위·낮으면 아래로 그렸어요. 범례를
-        누르면 그 지표만 또렷하게 보이고, 다시 누르면 모두 함께 보여요. 날짜를 누르면 그날 기록으로 넘어가요.
+        누르면 그 지표만 또렷하게 보이고, 다시 누르면 모두 함께 보여요. 기온·습도를 누르면 오른쪽에 실제 수치 눈금도 함께 나와요.
+        날짜를 누르면 그날 기록으로 넘어가요.
       </p>
 
       <div
@@ -168,7 +191,13 @@ export default function OverlayTrendChart({ pain, aux, onDateClick }: Props) {
         aria-label="불편함 지수와 수면 시간·기온·습도를 겹친 변화 그래프"
       >
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 12, right: 12, bottom: 0, left: -20 }} onMouseMove={pick} onClick={click}>
+          <ComposedChart
+            data={data}
+            // 오른쪽 실제 수치 눈금을 보여 줄 때는 글자가 잘리지 않게 여유를 더 둔다.
+            margin={{ top: 12, right: rightAxisMetric ? 34 : 12, bottom: 0, left: -20 }}
+            onMouseMove={pick}
+            onClick={click}
+          >
             <CartesianGrid vertical={false} stroke={theme.grid} />
             <XAxis dataKey="date" tickFormatter={formatMonthDay} tickLine={false} axisLine={false} minTickGap={24} tick={theme.tick} />
             <YAxis
@@ -180,8 +209,19 @@ export default function OverlayTrendChart({ pain, aux, onDateClick }: Props) {
               axisLine={false}
               tick={theme.tick}
             />
-            {/* 보조 지표(0~1)가 그래프 위아래 끝에 붙지 않게 조금 여유를 둔다 */}
-            <YAxis yAxisId="aux" orientation="right" domain={[0, 1]} hide />
+            {/* 보조 지표(0~1)가 그래프 위아래 끝에 붙지 않게 조금 여유를 둔다.
+                기온·습도를 강조한 동안만 오른쪽에 그 지표의 실제 수치 눈금을 보여 준다. */}
+            <YAxis
+              yAxisId="aux"
+              orientation="right"
+              domain={[0, 1]}
+              hide={!rightAxisMetric}
+              ticks={AUX_AXIS_TICKS}
+              tickFormatter={formatRightAxisTick}
+              tickLine={false}
+              axisLine={false}
+              tick={theme.tick}
+            />
             {AUX_METRICS.map((m) => (
               <Line
                 key={m.key}
